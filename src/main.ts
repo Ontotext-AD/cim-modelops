@@ -1,8 +1,7 @@
 import { fillQuery, queries } from "./queries";
 
-// Dev: Vite proxies /graphdb and strips Origin (GraphDB CORS rejects most Origins).
-// Prod (GitHub Pages): call GraphDB directly — allow https://ontotext-ad.github.io in GraphDB CORS.
-const GRAPHDB = import.meta.env.DEV ? "/graphdb" : "https://cim.ontotext.com/graphdb";
+// Same-origin /graphdb: Vite strips Origin in dev; at cim.ontotext.com/model-ops the real /graphdb is same host (no CORS).
+const GRAPHDB = "/graphdb";
 const REPO_CIM = `${GRAPHDB}/repositories/cim-history`;
 const REPO_DIFF = `${GRAPHDB}/repositories/cim-modelops`;
 const GRAPHDB_UI = "https://cim.ontotext.com/graphdb";
