@@ -1,6 +1,6 @@
 import { fillQuery, queries } from "./queries";
 
-// Same-origin /graphdb: Vite strips Origin in dev; at cim.ontotext.com/model-ops the real /graphdb is same host (no CORS).
+// Same-origin /graphdb: Vite strips Origin in dev; at cim.ontotext.com/modelops the real /graphdb is same host (no CORS).
 const GRAPHDB = "/graphdb";
 const REPO_CIM = `${GRAPHDB}/repositories/cim-history`;
 const REPO_DIFF = `${GRAPHDB}/repositories/cim-modelops`;
