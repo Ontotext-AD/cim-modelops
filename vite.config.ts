@@ -1,8 +1,8 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  // Served at https://cim.ontotext.com/model-ops/ (reverse-proxied from GitHub Pages).
-  base: "/model-ops/",
+  // Served at https://cim.ontotext.com/modelops/ (reverse-proxied from GitHub Pages).
+  base: "/modelops/",
   server: {
     proxy: {
       "/graphdb": {
