@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>CIM switch toggle</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>CIM switch toggle</h1>
+      <nav id="tabs" role="tablist">
+        <button type="button" role="tab" id="tab-switches" aria-selected="true" data-tab="switches">Switches</button>
+        <button type="button" role="tab" id="tab-history" aria-selected="false" data-tab="history">History</button>
+        <button type="button" role="tab" id="tab-models" aria-selected="false" data-tab="models">Models</button>
+      </nav>
+      <span id="status"></span>
+    </header>
+
+    <div id="panel-switches" class="panel" role="tabpanel">
+      <main>
+        <section id="left">
+          <input id="filter" type="search" placeholder="Filter by name" value="ARENDAL 300" />
+          <ul id="switches"></ul>
+        </section>
+        <section id="right">
+          <h2>Pending quads</h2>
+          <pre id="quads"></pre>
+          <h2>Diff</h2>
+          <table id="diff">
+            <thead>
+              <tr><th>Name</th><th>Type</th><th>Graph</th><th>Old</th><th>New</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div id="actions">
+            <button id="reset">Reset</button>
+            <button id="submit">Submit</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="panel-history" class="panel" role="tabpanel" hidden>
+      <div id="history-toolbar">
+        <button type="button" id="history-refresh">Refresh</button>
+        <button type="button" id="history-gen-diff" disabled>Generate difference model</button>
+        <span id="history-range"></span>
+        <span id="history-count"></span>
+      </div>
+      <div id="history-wrap">
+        <table id="history">
+          <thead>
+            <tr>
+              <th title="Range start">From</th>
+              <th title="Range end">To</th>
+              <th>Time</th>
+              <th>Op</th>
+              <th>Subject</th>
+              <th>Predicate</th>
+              <th>Object</th>
+              <th>Graph</th>
+              <th>User</th>
+              <th>Transaction</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div id="panel-models" class="panel" role="tabpanel" hidden>
+      <div id="models-toolbar">
+        <button type="button" id="models-refresh">Refresh</button>
+        <span id="models-count"></span>
+      </div>
+      <div id="models-wrap">
+        <table id="models">
+          <thead>
+            <tr>
+              <th>Kind</th>
+              <th>Model</th>
+              <th>Graph</th>
+              <th>Version</th>
+              <th>Issued</th>
+              <th>Period</th>
+              <th>Profile</th>
+              <th>Previous</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

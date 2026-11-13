@@ -1,0 +1,20 @@
+# Full History log for the History tab (repository `cim-history`).
+# Explicit triples only; excludes the implicit graph.
+# ?i = true → INSERT; ?i = false → DELETE.
+
+PREFIX onto: <http://www.ontotext.com/>
+PREFIX hist: <http://www.ontotext.com/at/>
+
+SELECT *
+FROM onto:explicit {
+  ?transactionId a hist:history ;
+    hist:timestamp ?time ;
+    hist:subject ?s ;
+    hist:predicate ?p ;
+    hist:object ?o ;
+    hist:insert ?i .
+  OPTIONAL { ?transactionId hist:graph ?g }
+  OPTIONAL { ?transactionId hist:username ?username }
+  FILTER (BOUND(?g) && ?g != <http://www.ontotext.com/implicit>)
+}
+ORDER BY DESC(?time)

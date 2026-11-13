@@ -1,0 +1,15 @@
+# List Breaker / Disconnector switches and their open state (repository `cim-history`).
+# Used by the Switches tab on load.
+
+PREFIX cim: <https://cim.ucaiug.io/ns#>
+PREFIX dct: <http://purl.org/dc/terms/>
+
+SELECT ?g ?sw ?type ?name ?open (SAMPLE(?t) AS ?title) (SAMPLE(?d) AS ?desc) WHERE {
+  GRAPH ?g { ?sw cim:Switch.open ?open }
+  ?sw a ?type ; cim:IdentifiedObject.name ?name .
+  VALUES ?type { cim:Breaker cim:Disconnector }
+  OPTIONAL { ?g dct:title ?t }
+  OPTIONAL { ?g dct:description ?d }
+}
+GROUP BY ?g ?sw ?type ?name ?open
+ORDER BY ?name
