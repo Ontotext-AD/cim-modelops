@@ -5,8 +5,9 @@
 #
 # Placeholders (filled by the app; both VALUES blocks must stay in sync).
 # No VALUES directly in the SERVICE block: GraphDB's History plugin then returns nothing.
-#   <urn:uuid:GRAPH>     → source named graph
-#   "T1"^^xsd:dateTime   → snapshot time
+#   <repository:HISTORY_REPO> → federated history repo id
+#   <urn:uuid:GRAPH>          → source named graph
+#   "T1"^^xsd:dateTime        → snapshot time
 
 PREFIX hist: <http://www.ontotext.com/at/>
 PREFIX dcat: <http://www.w3.org/ns/dcat#>
@@ -28,7 +29,7 @@ INSERT {
   }
 }
 WHERE {
-  SERVICE <repository:cim-history> {
+  SERVICE <repository:HISTORY_REPO> {
     {
       {
         SELECT ?g ?t1 ?s ?p ?o (MIN(?time) AS ?firstAfter) WHERE {

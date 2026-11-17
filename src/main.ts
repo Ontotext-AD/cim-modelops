@@ -1,10 +1,15 @@
 import { fillQuery, queries } from "./queries";
 
-// Same-origin /graphdb: Vite strips Origin in dev; at cim.ontotext.com/modelops the real /graphdb is same host (no CORS).
-const GRAPHDB = "/graphdb";
-const REPO_CIM = `${GRAPHDB}/repositories/cim-history`;
-const REPO_DIFF = `${GRAPHDB}/repositories/cim-modelops`;
-const GRAPHDB_UI = "https://cim.ontotext.com/graphdb";
+// Dev: Vite proxies /graphdb → localhost:7200.
+// Production (GitHub Pages): absolute GraphDB URL — needs CORS for ontotext-ad.github.io.
+const DEV = import.meta.env.DEV;
+const GRAPHDB = DEV ? "/graphdb" : "https://cim.ontotext.com/graphdb";
+const REPO_CIM_ID = DEV ? "cim" : "cim-history";
+const REPO_DIFF_ID = DEV ? "cim-diff-models" : "cim-modelops";
+const REPO_CIM = `${GRAPHDB}/repositories/${REPO_CIM_ID}`;
+const REPO_DIFF = `${GRAPHDB}/repositories/${REPO_DIFF_ID}`;
+const GRAPHDB_UI = DEV ? "http://localhost:7200" : "https://cim.ontotext.com/graphdb";
+const HISTORY_SERVICE = `<repository:${REPO_CIM_ID}>`;
 
 interface Binding {
   type: string;
@@ -99,11 +104,11 @@ function escape(s: string) {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 }
 
-function resourceUrl(iri: string, repositoryId = "cim-history") {
+function resourceUrl(iri: string, repositoryId = REPO_CIM_ID) {
   return `${GRAPHDB_UI}/resource?uri=${encodeURIComponent(iri)}&repositoryId=${encodeURIComponent(repositoryId)}`;
 }
 
-function formatBinding(b: Binding | undefined, repositoryId = "cim-history"): string {
+function formatBinding(b: Binding | undefined, repositoryId = REPO_CIM_ID): string {
   if (!b) return "";
   if (b.type === "uri") {
     const label = shortIri(b.value);
@@ -156,6 +161,7 @@ async function sparqlUpdate(repo: string, update: string) {
 function buildFullModelUpdate(graph: string, t1Iso: string): string {
   const t1 = sparqlDateTime(t1Iso);
   return fillQuery(queries.historyFullModelFederated, {
+    "<repository:HISTORY_REPO>": HISTORY_SERVICE,
     "<urn:uuid:GRAPH>": `<${graph}>`,
     '"T1"^^xsd:dateTime': `"${t1}"^^xsd:dateTime`,
   });
@@ -165,6 +171,7 @@ function buildDiffModelUpdate(graph: string, t1Iso: string, t2Iso: string): stri
   const t1 = sparqlDateTime(t1Iso);
   const t2 = sparqlDateTime(t2Iso);
   return fillQuery(queries.historyDiffModelFederated, {
+    "<repository:HISTORY_REPO>": HISTORY_SERVICE,
     "<urn:uuid:GRAPH>": `<${graph}>`,
     '"T1"^^xsd:dateTime': `"${t1}"^^xsd:dateTime`,
     '"T2"^^xsd:dateTime': `"${t2}"^^xsd:dateTime`,
@@ -312,7 +319,7 @@ async function loadHistory() {
   );
   historyLoaded = true;
   historyCount.textContent = `${historyRows.length} event(s)`;
-  statusEl.textContent = `${historyRows.length} history events from cim-history`;
+  statusEl.textContent = `${historyRows.length} history events from ${REPO_CIM_ID}`;
   updateHistoryRangeUi();
 }
 
@@ -341,7 +348,7 @@ async function generateFullModel(row: HistoryRow) {
   try {
     await sparqlUpdate(REPO_DIFF, buildFullModelUpdate(row.g.value, row.time.value));
     modelsLoaded = false;
-    statusEl.textContent = `Full model written to cim-modelops (${shortGraph(row.g.value)} @ ${formatTime(row.time.value)})`;
+    statusEl.textContent = `Full model written to ${REPO_DIFF_ID} (${shortGraph(row.g.value)} @ ${formatTime(row.time.value)})`;
   } finally {
     updateHistoryRangeUi();
   }
@@ -360,7 +367,7 @@ async function generateDiffModel() {
   try {
     await sparqlUpdate(REPO_DIFF, buildDiffModelUpdate(from.g.value, from.time.value, to.time.value));
     modelsLoaded = false;
-    statusEl.textContent = `Difference model written to cim-modelops (${shortGraph(from.g.value)})`;
+    statusEl.textContent = `Difference model written to ${REPO_DIFF_ID} (${shortGraph(from.g.value)})`;
   } finally {
     updateHistoryRangeUi();
   }
@@ -381,7 +388,7 @@ async function loadModels() {
         b.start || b.end
           ? `${b.start ? formatTime(b.start.value) : "—"} → ${b.end ? formatTime(b.end.value) : "—"}`
           : "";
-      const m = (x: Binding | undefined) => formatBinding(x, "cim-modelops");
+      const m = (x: Binding | undefined) => formatBinding(x, REPO_DIFF_ID);
       tr.innerHTML = `
         <td><span class="kind ${kind === "FullModel" ? "full" : "diff"}">${escape(kind)}</span></td>
         <td>${m(b.model)}</td>
@@ -396,8 +403,8 @@ async function loadModels() {
     }),
   );
   modelsLoaded = true;
-  modelsCount.textContent = `${rows.length} model(s) in cim-modelops`;
-  statusEl.textContent = `${rows.length} model(s) from cim-modelops`;
+  modelsCount.textContent = `${rows.length} model(s) in ${REPO_DIFF_ID}`;
+  statusEl.textContent = `${rows.length} model(s) from ${REPO_DIFF_ID}`;
 }
 
 function toggle(s: Switch) {

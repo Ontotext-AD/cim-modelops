@@ -2,8 +2,8 @@
 
 Browser demo for CIM switch toggles, GraphDB History, and difference/full models against [cim.ontotext.com](https://cim.ontotext.com/graphdb).
 
-**Live (via reverse proxy):** https://cim.ontotext.com/modelops/  
-**Origin (GitHub Pages):** https://ontotext-ad.github.io/cim-modelops/
+**Live (GitHub Pages):** https://ontotext-ad.github.io/cim-modelops/  
+**Optional reverse proxy:** https://cim.ontotext.com/modelops/ (not required once GraphDB CORS allows the Pages origin)
 
 ## Local development
 
@@ -12,13 +12,19 @@ npm install
 npm run dev
 ```
 
-Vite serves the UI (`base: /modelops/`) and proxies `/graphdb` → `https://cim.ontotext.com`, stripping `Origin`/`Referer` so GraphDB’s CORS filter accepts the requests.
+Vite serves the UI (`base: ./`) and proxies `/graphdb` → `http://localhost:7200` (strips the `/graphdb` prefix). Local repos: `cim`, `cim-diff-models`.
 
-## Production on cim.ontotext.com
+## Production (GitHub Pages)
 
-The app and GraphDB share the host, so the UI calls `/graphdb/...` with no CORS change needed.
+The production build calls GraphDB at `https://cim.ontotext.com/graphdb` (repos `cim-history`, `cim-modelops`). Asset URLs are relative (`base: ./`) so they work under `/cim-modelops/`.
 
-Ask IT for an ingress/nginx path (leave `/graphdb` and `/chat` alone):
+Allow CORS on GraphDB for origin `https://ontotext-ad.github.io` (SPARQL query + update). Until that is set, the UI loads but data requests fail.
+
+Pushes to `main` rebuild and publish Pages via Actions.
+
+## Optional: same-host proxy
+
+If preferred later (leave `/graphdb` and `/chat` alone):
 
 ```nginx
 location /modelops/ {
@@ -27,10 +33,6 @@ location /modelops/ {
     proxy_set_header Host ontotext-ad.github.io;
 }
 ```
-
-Trailing slashes matter: `/modelops/` is rewritten to `/cim-modelops/` on GitHub Pages. Vite `base` is `/modelops/` so asset URLs match the public path.
-
-Pushes to `main` rebuild and publish Pages via Actions.
 
 ## Scripts
 

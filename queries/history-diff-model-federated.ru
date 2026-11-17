@@ -6,9 +6,10 @@
 #
 # Placeholders (filled by the app). No VALUES directly in the SERVICE block:
 # GraphDB's History plugin then returns nothing.
-#   <urn:uuid:GRAPH>     → source named graph
-#   "T1"^^xsd:dateTime   → from time
-#   "T2"^^xsd:dateTime   → to time
+#   <repository:HISTORY_REPO> → federated history repo id
+#   <urn:uuid:GRAPH>          → source named graph
+#   "T1"^^xsd:dateTime        → from time
+#   "T2"^^xsd:dateTime        → to time
 
 PREFIX hist:    <http://www.ontotext.com/at/>
 PREFIX dcat:    <http://www.w3.org/ns/dcat#>
@@ -37,7 +38,7 @@ INSERT {
   GRAPH ?target { ?s ?p ?o }
 }
 WHERE {
-  SERVICE <repository:cim-history> {
+  SERVICE <repository:HISTORY_REPO> {
     {
       SELECT ?g ?t1 ?t2 ?s ?p ?o (MIN(?time) AS ?first) (MAX(?time) AS ?last) WHERE {
         VALUES (?g ?t1 ?t2) {

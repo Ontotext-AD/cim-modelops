@@ -3,9 +3,10 @@
  * Edit the .rq / .ru files to change GraphDB interaction; this module only loads them.
  *
  * Parameterized updates use simple placeholders (see fillQuery):
- *   <urn:uuid:GRAPH>   → source named graph IRI
- *   "T1"^^xsd:dateTime → from / snapshot timestamp
- *   "T2"^^xsd:dateTime → to timestamp
+ *   <urn:uuid:GRAPH>            → source named graph IRI
+ *   "T1"^^xsd:dateTime          → from / snapshot timestamp
+ *   "T2"^^xsd:dateTime          → to timestamp
+ *   <repository:HISTORY_REPO>   → federated history repo (cim-history / cim)
  *   {{DELETE_QUADS}} / {{INSERT_QUADS}} → switch flip bodies
  */
 
