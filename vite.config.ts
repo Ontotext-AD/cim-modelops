@@ -1,16 +1,18 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  // GitHub Pages project site: https://ontotext-ad.github.io/cim-modelops/
-  base: "/cim-modelops/",
+  // Relative base so assets resolve under both:
+  //   https://ontotext-ad.github.io/cim-modelops/
+  //   https://cim.ontotext.com/modelops/ (reverse-proxied from Pages)
+  base: "./",
   server: {
     proxy: {
       "/graphdb": {
-        target: "https://cim.ontotext.com",
+        // Local GraphDB (Workbench at http://localhost:7200). Strip /graphdb prefix.
+        target: "http://localhost:7200",
         changeOrigin: true,
-        secure: true,
+        rewrite: (path) => path.replace(/^\/graphdb/, ""),
         configure: (proxy) => {
-          // GraphDB's CORS filter rejects browser Origin from localhost.
           proxy.on("proxyReq", (proxyReq) => {
             proxyReq.removeHeader("origin");
             proxyReq.removeHeader("referer");
