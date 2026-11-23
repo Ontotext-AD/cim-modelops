@@ -1,9 +1,11 @@
 # Full History log for the History tab (repository `cim-history`).
 # Explicit triples only; excludes the implicit graph.
 # ?i = true → INSERT; ?i = false → DELETE.
+# ?sName / ?sDesc label the subject (cim:IdentifiedObject.name / .description).
 
 PREFIX onto: <http://www.ontotext.com/>
 PREFIX hist: <http://www.ontotext.com/at/>
+PREFIX cim:  <https://cim.ucaiug.io/ns#>
 
 SELECT *
 FROM onto:explicit {
@@ -15,6 +17,13 @@ FROM onto:explicit {
     hist:insert ?i .
   OPTIONAL { ?transactionId hist:graph ?g }
   OPTIONAL { ?transactionId hist:username ?username }
+  OPTIONAL {
+    SELECT ?s (SAMPLE(?n) AS ?sName) (SAMPLE(?d) AS ?sDesc) WHERE {
+      ?s cim:IdentifiedObject.name ?n .
+      OPTIONAL { ?s cim:IdentifiedObject.description ?d }
+    }
+    GROUP BY ?s
+  }
   FILTER (BOUND(?g) && ?g != <http://www.ontotext.com/implicit>)
 }
 ORDER BY DESC(?time)
