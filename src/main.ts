@@ -112,6 +112,8 @@ const shortIri = (iri: string) => {
 /** "name: description", dropping whichever part is missing. */
 const nameDesc = (name?: string, desc?: string) => [name, desc].filter(Boolean).join(": ");
 const switchLabel = (s: Switch) => nameDesc(s.name, s.swDesc);
+/** History username, hiding GraphDB's placeholder for unauthenticated writes. */
+const displayUser = (u?: string) => (!u || u === "<free access user>" ? "" : u);
 
 function escape(s: string) {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -332,7 +334,7 @@ async function loadHistory() {
         <td>${subjectLabel ? resourceLink(b.s.value, subjectLabel) : formatBinding(b.s)}</td>
         <td>${formatBinding(b.p)}</td>
         <td>${formatBinding(b.o)}</td>
-        <td class="user">${escape(b.username?.value ?? "")}</td>`;
+        <td class="user">${escape(displayUser(b.username?.value))}</td>`;
       tr.prepend(toTd);
       tr.prepend(fromTd);
       tr.append(actionTd);
