@@ -37,7 +37,6 @@ interface HistoryRow {
   p: Binding;
   o: Binding;
   i: Binding;
-  username?: Binding;
   sName?: Binding;
   sDesc?: Binding;
 }
@@ -51,11 +50,33 @@ interface ModelRow {
   title?: Binding;
   desc?: Binding;
   prev?: Binding;
-  profile?: Binding;
-  start?: Binding;
-  end?: Binding;
   fwd?: Binding;
   rev?: Binding;
+}
+
+/** One History transaction and the triples it changed. */
+interface Transaction {
+  id: string;
+  time: string;
+  g: string;
+  rows: HistoryRow[];
+}
+
+/** The base SSH FullModel in cim-history: version 1 of the model chain. */
+interface BaseModel {
+  g: string;
+  title: string;
+  desc: string;
+  version: string;
+  issued: string;
+}
+
+type ExportKind = "full" | "diff";
+
+/** The model a new export builds on (dcat:previousVersion) and its version. */
+interface Prior {
+  iri: string;
+  version: number;
 }
 
 type Tab = "switches" | "history" | "models";
@@ -63,12 +84,16 @@ type Tab = "switches" | "history" | "models";
 let switches: Switch[] = [];
 const pending = new Map<string, boolean>();
 let historyRows: HistoryRow[] = [];
+let transactions: Transaction[] = [];
+let modelRows: ModelRow[] = [];
+let baseModel: BaseModel | null = null;
 let historyLoaded = false;
 let modelsLoaded = false;
 let transactionCount: number | null = null;
 let modelCount: number | null = null;
-let fromIdx: number | null = null;
-let toIdx: number | null = null;
+/** Transaction picked as From for a Diff export. */
+let fromTxId: string | null = null;
+const expandedTx = new Set<string>();
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 const statusEl = $<HTMLSpanElement>("#status");
@@ -78,13 +103,7 @@ const quadsEl = $<HTMLPreElement>("#quads");
 const diffBody = $<HTMLTableSectionElement>("#diff tbody");
 const submitEl = $<HTMLButtonElement>("#submit");
 const historyBody = $<HTMLTableSectionElement>("#history tbody");
-const historyCount = $<HTMLSpanElement>("#history-count");
-const historyRange = $<HTMLSpanElement>("#history-range");
-const historyRefresh = $<HTMLButtonElement>("#history-refresh");
-const historyGenDiff = $<HTMLButtonElement>("#history-gen-diff");
 const modelsBody = $<HTMLTableSectionElement>("#models tbody");
-const modelsCount = $<HTMLSpanElement>("#models-count");
-const modelsRefresh = $<HTMLButtonElement>("#models-refresh");
 const panelSwitches = $<HTMLDivElement>("#panel-switches");
 const panelHistory = $<HTMLDivElement>("#panel-history");
 const panelModels = $<HTMLDivElement>("#panel-models");
@@ -112,8 +131,8 @@ const shortIri = (iri: string) => {
 /** "name: description", dropping whichever part is missing. */
 const nameDesc = (name?: string, desc?: string) => [name, desc].filter(Boolean).join(": ");
 const switchLabel = (s: Switch) => nameDesc(s.name, s.swDesc);
-/** History username, hiding GraphDB's placeholder for unauthenticated writes. */
-const displayUser = (u?: string) => (!u || u === "<free access user>" ? "" : u);
+/** Models → Graph: a model graph has no name of its own, so the link says what it opens (its IRI is the tooltip). */
+const GRAPH_LINK_TEXT = "contents";
 
 function escape(s: string) {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -173,16 +192,18 @@ async function sparqlUpdate(repo: string, update: string) {
   if (!res.ok) throw new Error(`Update failed: ${res.status} ${await res.text()}`);
 }
 
-function buildFullModelUpdate(graph: string, t1Iso: string): string {
+function buildFullModelUpdate(graph: string, t1Iso: string, prior: string, version: number): string {
   const t1 = sparqlDateTime(t1Iso);
   return fillQuery(queries.historyFullModelFederated, {
     "<repository:HISTORY_REPO>": HISTORY_SERVICE,
     "<urn:uuid:GRAPH>": `<${graph}>`,
     '"T1"^^xsd:dateTime': `"${t1}"^^xsd:dateTime`,
+    "<urn:uuid:PRIOR>": `<${prior}>`,
+    '"NEXT_VERSION"': `"${version}"`,
   });
 }
 
-function buildDiffModelUpdate(graph: string, t1Iso: string, t2Iso: string): string {
+function buildDiffModelUpdate(graph: string, t1Iso: string, t2Iso: string, prior: string, version: number): string {
   const t1 = sparqlDateTime(t1Iso);
   const t2 = sparqlDateTime(t2Iso);
   return fillQuery(queries.historyDiffModelFederated, {
@@ -190,6 +211,8 @@ function buildDiffModelUpdate(graph: string, t1Iso: string, t2Iso: string): stri
     "<urn:uuid:GRAPH>": `<${graph}>`,
     '"T1"^^xsd:dateTime': `"${t1}"^^xsd:dateTime`,
     '"T2"^^xsd:dateTime': `"${t2}"^^xsd:dateTime`,
+    "<urn:uuid:PRIOR>": `<${prior}>`,
+    '"NEXT_VERSION"': `"${version}"`,
   });
 }
 
@@ -218,185 +241,270 @@ function renderCounts() {
     transactionCount == null ? "Loading transactions…" : `${transactionCount} transactions in ${REPO_CIM_ID}`;
 }
 
-function rowTime(idx: number) {
-  return new Date(historyRows[idx].time.value).getTime();
+const ms = (iso: string) => new Date(iso).getTime();
+
+/**
+ * A model belongs to the transaction it was exported at: its dct:issued is that
+ * transaction's time. Models exported before milliseconds were kept have a
+ * whole-second dct:issued, so those match on the second.
+ */
+function sameInstant(issued: string, txTime: string) {
+  if (ms(issued) === ms(txTime)) return true;
+  return !/\.\d+/.test(issued) && Math.floor(ms(txTime) / 1000) * 1000 === ms(issued);
 }
 
-function canBeFrom(idx: number) {
-  if (toIdx == null) return true;
-  const to = historyRows[toIdx];
-  const row = historyRows[idx];
-  return row.g.value === to.g.value && rowTime(idx) < rowTime(toIdx);
+const modelKind = (m: ModelRow): ExportKind => (m.kind.value === "FullModel" ? "full" : "diff");
+const versionOf = (m: ModelRow) => parseInt(m.version?.value ?? "", 10) || 0;
+
+/** The model of this kind already exported at a transaction (at most one: exports aren't repeated). */
+function txModel(tx: Transaction, kind: ExportKind) {
+  return modelRows.find((m) => modelKind(m) === kind && m.issued && sameInstant(m.issued.value, tx.time));
 }
 
-function canBeTo(idx: number) {
-  if (fromIdx == null) return true;
-  const from = historyRows[fromIdx];
-  const row = historyRows[idx];
-  return row.g.value === from.g.value && rowTime(idx) > rowTime(fromIdx);
+/**
+ * The newest exported model: the head of the chain (highest version, then latest issued).
+ * The chain is one line, with no branching (CIM ModelOps PoC), so every export builds on
+ * the head and only transactions after it can be exported.
+ */
+function headModel(): ModelRow | null {
+  const sorted = [...modelRows].sort(
+    (a, b) => versionOf(b) - versionOf(a) || ms(b.issued?.value ?? "") - ms(a.issued?.value ?? ""),
+  );
+  return sorted[0] ?? null;
 }
 
-function updateHistoryRangeUi() {
-  const from = fromIdx != null ? historyRows[fromIdx] : null;
-  const to = toIdx != null ? historyRows[toIdx] : null;
-  if (from && to) {
-    historyRange.textContent = `${from.time.value} → ${to.time.value} · ${shortGraph(from.g.value)}`;
-    historyGenDiff.disabled = false;
-  } else {
-    historyRange.textContent = from || to ? "Select both From and To" : "";
-    historyGenDiff.disabled = true;
-  }
+/** What a new export builds on: the head model, else the base SSH model (version 1). */
+function headPrior(): Prior {
+  const head = headModel();
+  if (head) return { iri: head.model.value, version: versionOf(head) };
+  return { iri: baseModel!.g, version: parseInt(baseModel!.version, 10) || 1 };
+}
+
+/** The transaction the head model was exported at (only it can be From). */
+function isHeadTx(tx: Transaction) {
+  const head = headModel();
+  return !!head?.issued && sameInstant(head.issued.value, tx.time);
+}
+
+/** Exports only go forward: a transaction later than the head model. */
+function canExportAt(tx: Transaction) {
+  const head = headModel();
+  if (!head?.issued) return true;
+  return ms(tx.time) > ms(head.issued.value) && !isHeadTx(tx);
+}
+
+/** Tooltip for an export button that can't be used because the chain has moved past it. */
+function pastHeadTitle() {
+  const head = headModel();
+  return head ? `Only transactions after the newest model (v${versionOf(head)}, ${head.issued?.value}) can be exported` : "";
+}
+
+/** GraphDB Workbench link that opens a query on the transaction's switch states, using the Switches filter. */
+function transactionQueryUrl(txIri: string) {
+  const term = filterEl.value.trim();
+  const filter = term ? `filter(contains(?name, "${term.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"))` : "";
+  // Drop the file's comment header so Workbench shows just the query.
+  const template = queries.transactionSwitches.replace(/^(#.*\n)+\n?/, "");
+  const query = fillQuery(template, {
+    // Whole seconds only: GraphDB rejects the transaction graph with milliseconds (GDB-15823).
+    "<http://www.ontotext.com/at/TX>": `<${txIri.replace(/(\d{14})\d+$/, "$1")}>`,
+    "{{FILTER}}": filter,
+  });
+  return `${GRAPHDB_UI}/sparql?repositoryId=${encodeURIComponent(REPO_CIM_ID)}&query=${encodeURIComponent(query)}`;
 }
 
 async function loadHistory() {
   transactionCount = null;
   renderCounts();
-  historyCount.textContent = "";
-  historyRange.textContent = "";
   historyBody.replaceChildren();
-  fromIdx = null;
-  toIdx = null;
-  historyGenDiff.disabled = true;
+  fromTxId = null;
   const json = await sparqlSelect(REPO_CIM, queries.selectHistory);
   historyRows = (json.results.bindings as HistoryRow[]).filter(
     (b) => b.time && b.g && b.s && b.p && b.o && b.i && b.transactionId,
   );
+  // Group the changed triples by transaction, newest first (the query is ordered by time).
+  const byId = new Map<string, Transaction>();
+  for (const b of historyRows) {
+    const id = b.transactionId.value;
+    if (!byId.has(id)) byId.set(id, { id, time: b.time.value, g: b.g.value, rows: [] });
+    byId.get(id)!.rows.push(b);
+  }
+  transactions = [...byId.values()];
+  historyLoaded = true;
+  transactionCount = transactions.length;
+  renderCounts();
+  renderHistory();
+}
+
+function downloadLink(label: string, model: ModelRow) {
+  const a = document.createElement("a");
+  a.href = "#";
+  a.className = "download";
+  a.textContent = label;
+  a.title = `Download ${model.model.value} as TriG`;
+  a.onclick = (e) => {
+    e.preventDefault();
+    downloadTrig(model).catch((err) => (statusEl.textContent = String(err)));
+  };
+  return a;
+}
+
+function exportButton(label: string, title: string, enabled: boolean, onClick: () => Promise<void>) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "row-action";
+  btn.textContent = label;
+  btn.title = title;
+  btn.disabled = !enabled;
+  btn.onclick = () => {
+    btn.disabled = true;
+    onClick().catch((e) => {
+      statusEl.textContent = String(e);
+      renderHistory();
+    });
+  };
+  return btn;
+}
+
+/** Two-level History table: one row per transaction, its changed triples below it (collapsed by default). */
+function renderHistory() {
+  // Export state comes from the Models list; until it has loaded, nothing can be exported or picked.
+  const ready = modelsLoaded && baseModel != null;
+  // From can only be the head model's transaction; drop a stale pick after the head moves.
+  const fromTx = transactions.find((t) => t.id === fromTxId && isHeadTx(t)) ?? null;
+  if (!fromTx) fromTxId = null;
   historyBody.replaceChildren(
-    ...historyRows.map((b, idx) => {
-      const insert = b.i.value === "true";
-      const op = insert ? "insert" : "delete";
+    ...transactions.flatMap((tx) => {
+      const expanded = expandedTx.has(tx.id);
+      const full = txModel(tx, "full");
+      const diff = txModel(tx, "diff");
       const tr = document.createElement("tr");
-      tr.className = op;
-      tr.dataset.idx = String(idx);
+      tr.className = "tx";
+      tr.classList.toggle("selected-from", fromTxId === tx.id);
+
+      const toggleTd = document.createElement("td");
+      toggleTd.className = "toggle-cell";
+      const toggleBtn = document.createElement("button");
+      toggleBtn.type = "button";
+      toggleBtn.className = "toggle";
+      toggleBtn.textContent = expanded ? "▾" : "▸";
+      toggleBtn.setAttribute("aria-expanded", String(expanded));
+      toggleBtn.setAttribute("aria-label", `${expanded ? "Hide" : "Show"} changes of ${tx.time}`);
+      toggleBtn.onclick = () => {
+        if (expanded) expandedTx.delete(tx.id);
+        else expandedTx.add(tx.id);
+        renderHistory();
+      };
+      toggleTd.append(toggleBtn);
 
       const fromTd = document.createElement("td");
       fromTd.className = "pick";
       const fromCb = document.createElement("input");
       fromCb.type = "checkbox";
-      fromCb.title = "From (must be earlier than To)";
-      fromCb.checked = fromIdx === idx;
+      const canBeFrom = ready && isHeadTx(tx);
+      fromCb.disabled = !canBeFrom;
+      fromCb.checked = fromTxId === tx.id;
+      fromCb.title = canBeFrom
+        ? "Start a difference model from the newest model, exported here"
+        : full || diff
+          ? "Only the newest model can be a From"
+          : "Export a model at this transaction first";
       fromCb.onchange = () => {
-        if (fromCb.checked) {
-          if (!canBeFrom(idx)) {
-            fromCb.checked = false;
-            statusEl.textContent = "From must be earlier than To (same graph)";
-            return;
-          }
-          fromIdx = idx;
-        } else {
-          fromIdx = null;
-        }
-        syncHistoryChecks();
-        updateHistoryRangeUi();
+        fromTxId = fromCb.checked ? tx.id : null;
+        renderHistory();
       };
       fromTd.append(fromCb);
 
-      const toTd = document.createElement("td");
-      toTd.className = "pick";
-      const toCb = document.createElement("input");
-      toCb.type = "checkbox";
-      toCb.title = "To (must be later than From)";
-      toCb.checked = toIdx === idx;
-      toCb.onchange = () => {
-        if (toCb.checked) {
-          if (!canBeTo(idx)) {
-            toCb.checked = false;
-            statusEl.textContent = "To must be later than From (same graph)";
-            return;
-          }
-          toIdx = idx;
-        } else {
-          toIdx = null;
-        }
-        syncHistoryChecks();
-        updateHistoryRangeUi();
-      };
-      toTd.append(toCb);
+      const txTd = document.createElement("td");
+      txTd.className = "time";
+      const txLink = document.createElement("a");
+      txLink.href = transactionQueryUrl(tx.id);
+      txLink.target = "_blank";
+      txLink.rel = "noopener";
+      txLink.textContent = localName(tx.id);
+      txLink.title = "Open a query on this transaction in GraphDB (uses the Switches filter)";
+      // The filter may have changed since rendering, so build the link when it is followed.
+      txLink.onclick = () => (txLink.href = transactionQueryUrl(tx.id));
+      txTd.append(txLink);
 
-      const fullBtn = document.createElement("button");
-      fullBtn.type = "button";
-      fullBtn.className = "row-action";
-      fullBtn.textContent = "Full model";
-      fullBtn.title = `Extract full model for ${shortGraph(b.g.value)} at ${b.time.value}`;
-      fullBtn.onclick = () => {
-        generateFullModel(b).catch((e) => (statusEl.textContent = String(e)));
-      };
+      const timeTd = document.createElement("td");
+      timeTd.className = "time";
+      timeTd.textContent = tx.time;
 
-      const actionTd = document.createElement("td");
-      actionTd.className = "actions-cell";
-      actionTd.append(fullBtn);
+      const summaryTd = document.createElement("td");
+      summaryTd.colSpan = 4;
+      summaryTd.className = "summary";
+      const subjects = [...new Set(tx.rows.map((b) => b.sName?.value ?? shortIri(b.s.value)))];
+      summaryTd.textContent = `${tx.rows.length} changed triple(s): ${subjects.join(", ")}`;
 
-      const subjectLabel = nameDesc(b.sName?.value, b.sDesc?.value);
-      tr.innerHTML = `
-        <td class="time">${formatBinding(b.transactionId)}</td>
-        <td class="time">${escape(b.time.value)}</td>
-        <td><span class="op ${op}">${op}</span></td>
-        <td>${subjectLabel ? resourceLink(b.s.value, subjectLabel) : formatBinding(b.s)}</td>
-        <td>${formatBinding(b.p)}</td>
-        <td>${formatBinding(b.o)}</td>
-        <td class="user">${escape(displayUser(b.username?.value))}</td>`;
-      tr.prepend(toTd);
-      tr.prepend(fromTd);
-      tr.append(actionTd);
-      return tr;
+      const exportTd = document.createElement("td");
+      exportTd.className = "actions-cell";
+      const forward = ready && canExportAt(tx);
+      exportTd.append(
+        full
+          ? downloadLink("Download Full", full)
+          : exportButton(
+              "Full",
+              forward || !ready ? `Export a Full model at ${tx.time}` : pastHeadTitle(),
+              forward,
+              () => exportFull(tx),
+            ),
+        diff
+          ? downloadLink("Download Diff", diff)
+          : exportButton(
+              "Diff",
+              !forward && ready
+                ? pastHeadTitle()
+                : fromTx
+                  ? `Export a Difference model from ${fromTx.time} to ${tx.time}`
+                  : "Select the newest model as From first",
+              forward && !!fromTx && fromTx.g === tx.g,
+              () => exportDiff(fromTx!, tx),
+            ),
+      );
+
+      tr.append(toggleTd, fromTd, txTd, timeTd, summaryTd, exportTd);
+      const details = tx.rows.map((b) => {
+        const op = b.i.value === "true" ? "insert" : "delete";
+        const subjectLabel = nameDesc(b.sName?.value, b.sDesc?.value);
+        const row = document.createElement("tr");
+        row.className = `detail ${op}`;
+        row.hidden = !expanded;
+        row.innerHTML = `
+          <td></td><td></td><td></td><td></td>
+          <td><span class="op ${op}">${op}</span></td>
+          <td>${subjectLabel ? resourceLink(b.s.value, subjectLabel) : formatBinding(b.s)}</td>
+          <td>${formatBinding(b.p)}</td>
+          <td>${formatBinding(b.o)}</td>
+          <td></td>`;
+        return row;
+      });
+      return [tr, ...details];
     }),
   );
-  historyLoaded = true;
-  historyCount.textContent = `${historyRows.length} event(s)`;
-  transactionCount = new Set(historyRows.map((b) => b.transactionId.value)).size;
-  renderCounts();
-  updateHistoryRangeUi();
 }
 
-function syncHistoryChecks() {
-  historyBody.querySelectorAll<HTMLTableRowElement>("tr").forEach((tr) => {
-    const idx = Number(tr.dataset.idx);
-    const boxes = tr.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
-    const fromCb = boxes[0];
-    const toCb = boxes[1];
-    if (fromCb) {
-      fromCb.checked = fromIdx === idx;
-      fromCb.disabled = fromIdx !== idx && !canBeFrom(idx);
-    }
-    if (toCb) {
-      toCb.checked = toIdx === idx;
-      toCb.disabled = toIdx !== idx && !canBeTo(idx);
-    }
-    tr.classList.toggle("selected-from", fromIdx === idx);
-    tr.classList.toggle("selected-to", toIdx === idx);
-  });
+async function exportFull(tx: Transaction) {
+  const prior = headPrior();
+  const version = prior.version + 1;
+  statusEl.textContent = `Exporting Full model v${version} at ${tx.time}…`;
+  await sparqlUpdate(REPO_DIFF, buildFullModelUpdate(tx.g, tx.time, prior.iri, version));
+  await loadModels();
+  statusEl.textContent = `Full model v${version} written to ${REPO_DIFF_ID} (${shortGraph(tx.g)} @ ${tx.time})`;
+  setTab("models");
 }
 
-async function generateFullModel(row: HistoryRow) {
-  statusEl.textContent = `Generating full model at ${row.time.value}…`;
-  historyGenDiff.disabled = true;
-  try {
-    await sparqlUpdate(REPO_DIFF, buildFullModelUpdate(row.g.value, row.time.value));
-    modelsLoaded = false;
-    statusEl.textContent = `Full model written to ${REPO_DIFF_ID} (${shortGraph(row.g.value)} @ ${row.time.value})`;
-    setTab("models");
-  } finally {
-    updateHistoryRangeUi();
-  }
-}
-
-async function generateDiffModel() {
-  if (fromIdx == null || toIdx == null) return;
-  const from = historyRows[fromIdx];
-  const to = historyRows[toIdx];
-  if (from.g.value !== to.g.value || rowTime(fromIdx) >= rowTime(toIdx)) {
-    statusEl.textContent = "Invalid From/To range";
-    return;
-  }
-  statusEl.textContent = `Generating difference model ${from.time.value} → ${to.time.value}…`;
-  historyGenDiff.disabled = true;
-  try {
-    await sparqlUpdate(REPO_DIFF, buildDiffModelUpdate(from.g.value, from.time.value, to.time.value));
-    modelsLoaded = false;
-    statusEl.textContent = `Difference model written to ${REPO_DIFF_ID} (${shortGraph(from.g.value)})`;
-  } finally {
-    updateHistoryRangeUi();
-  }
+async function exportDiff(fromTx: Transaction, tx: Transaction) {
+  if (!isHeadTx(fromTx)) throw new Error(`From must be the newest model's transaction`);
+  const prior = headPrior();
+  const version = prior.version + 1;
+  statusEl.textContent = `Exporting Difference model v${version}, ${fromTx.time} → ${tx.time}…`;
+  await sparqlUpdate(REPO_DIFF, buildDiffModelUpdate(tx.g, fromTx.time, tx.time, prior.iri, version));
+  await loadModels();
+  // The query writes nothing when the switches end up as they were at From.
+  statusEl.textContent = txModel(tx, "diff")
+    ? `Difference model v${version} written to ${REPO_DIFF_ID} (${fromTx.time} → ${tx.time})`
+    : `No net change between ${fromTx.time} and ${tx.time}, so no Difference model was written`;
 }
 
 /** Download a model's graphs as TriG. A DifferenceSet also includes its forward/reverse difference graphs. */
@@ -408,62 +516,152 @@ async function downloadTrig(row: ModelRow) {
     headers: { Accept: "application/x-trig" },
   });
   if (!res.ok) throw new Error(`Download failed: ${res.status} ${await res.text()}`);
-  const url = URL.createObjectURL(await res.blob());
+  saveFile(await res.blob(), trigFileName(row.kind.value, row.model.value));
+}
+
+const trigFileName = (kind: string, iri: string) =>
+  `${kind}-${iri.replace(/^urn:uuid:/, "").replace(/[^\w.-]+/g, "_")}.trig`;
+
+function saveFile(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${row.kind.value}-${row.model.value.replace(/^urn:uuid:/, "").replace(/[^\w.-]+/g, "_")}.trig`;
+  a.download = name;
   a.click();
   URL.revokeObjectURL(url);
-  statusEl.textContent = `Downloaded ${a.download}`;
+  statusEl.textContent = `Downloaded ${name}`;
+}
+
+/**
+ * Download the base SSH model as it was before any transaction, as TriG.
+ * GraphDB returns the rebuilt triples as Turtle; they go into the model's graph,
+ * with the prefix lines kept at the top.
+ */
+async function downloadBase(base: BaseModel) {
+  statusEl.textContent = `Downloading ${shortGraph(base.g)} as TriG…`;
+  const query = fillQuery(queries.constructBaseModel, { "<urn:uuid:GRAPH>": `<${base.g}>` });
+  const res = await fetch(`${REPO_CIM}?query=${encodeURIComponent(query)}`, {
+    headers: { Accept: "text/turtle" },
+  });
+  if (!res.ok) throw new Error(`Download failed: ${res.status} ${await res.text()}`);
+  const lines = (await res.text()).split("\n");
+  const isPrefix = (l: string) => /^\s*(@prefix|@base|prefix|base)\b/i.test(l);
+  const trig = `${lines.filter(isPrefix).join("\n")}\n\n<${base.g}> {\n${lines
+    .filter((l) => !isPrefix(l))
+    .join("\n")
+    .trim()}\n}\n`;
+  saveFile(new Blob([trig], { type: "application/trig" }), trigFileName("FullModel", base.g));
+}
+
+/** The base SSH FullModel (cim-history). dct:issued can be both a date and a dateTime; keep the longer one. */
+async function loadBaseModel(): Promise<BaseModel | null> {
+  const json = await sparqlSelect(REPO_CIM, queries.selectBaseModel);
+  const rows = json.results.bindings as Record<string, Binding | undefined>[];
+  if (!rows.length) return null;
+  const pick = (k: string) =>
+    rows.map((r) => r[k]?.value ?? "").reduce((a, b) => (b.length > a.length ? b : a), "");
+  return {
+    g: rows[0].g!.value,
+    title: pick("title"),
+    desc: pick("desc"),
+    version: pick("version"),
+    issued: pick("issued"),
+  };
+}
+
+/** Download link cell for the Models table, styled like the History tab's download links. */
+function downloadCell(onClick: () => Promise<void>, title: string) {
+  const a = document.createElement("a");
+  a.href = "#";
+  a.className = "download";
+  a.textContent = "Download TriG";
+  a.title = title;
+  a.onclick = (e) => {
+    e.preventDefault();
+    onClick().catch((err) => (statusEl.textContent = String(err)));
+  };
+  const td = document.createElement("td");
+  td.className = "actions-cell";
+  td.append(a);
+  return td;
+}
+
+/** Readable label (dct:title, else dct:description) and repository for each Prior Version. */
+async function priorVersionLabels(rows: ModelRow[]) {
+  const labels = new Map<string, { label: string; repo: string }>();
+  for (const r of rows) {
+    const label = r.title?.value || r.desc?.value;
+    if (label) labels.set(r.model.value, { label, repo: REPO_DIFF_ID });
+  }
+  // Prior versions not in cim-modelops (the base SSH model) live in cim-history.
+  const missing = [...new Set(rows.map((r) => r.prev?.value))].filter(
+    (iri): iri is string => !!iri && !labels.has(iri),
+  );
+  if (missing.length) {
+    const json = await sparqlSelect(
+      REPO_CIM,
+      fillQuery(queries.selectLabels, { "{{IRIS}}": missing.map((iri) => `<${iri}>`).join(" ") }),
+    );
+    for (const b of json.results.bindings as Record<string, Binding | undefined>[]) {
+      const label = b.title?.value || b.desc?.value;
+      if (label) labels.set(b.s!.value, { label, repo: REPO_CIM_ID });
+    }
+  }
+  return labels;
 }
 
 async function loadModels() {
+  modelsLoaded = false;
   modelCount = null;
   renderCounts();
-  modelsCount.textContent = "";
+  if (historyLoaded) renderHistory();
   modelsBody.replaceChildren();
-  const json = await sparqlSelect(REPO_DIFF, queries.selectModels);
+  const [json, base] = await Promise.all([sparqlSelect(REPO_DIFF, queries.selectModels), loadBaseModel()]);
   const rows = json.results.bindings as ModelRow[];
+  const priorLabels = await priorVersionLabels(rows);
+  modelRows = rows;
+  baseModel = base;
   modelsBody.replaceChildren(
     ...rows.map((b) => {
       const tr = document.createElement("tr");
       const kind = b.kind.value;
       tr.className = kind === "FullModel" ? "kind-full" : "kind-diff";
-      const period =
-        b.start || b.end
-          ? `${b.start?.value ?? "—"} → ${b.end?.value ?? "—"}`
-          : "";
       const m = (x: Binding | undefined) => formatBinding(x, REPO_DIFF_ID);
       // dct:title and dct:description are both optional; fall back to the IRI only if neither is set.
       const modelLabel = nameDesc(b.title?.value, b.desc?.value);
+      const prior = b.prev ? priorLabels.get(b.prev.value) : undefined;
       tr.innerHTML = `
         <td class="kind-cell"><span class="kind ${kind === "FullModel" ? "full" : "diff"}">${escape(kind)}</span></td>
         <td>${modelLabel ? resourceLink(b.model.value, modelLabel, REPO_DIFF_ID) : m(b.model)}</td>
-        <td>${resourceLink(b.g.value, shortIri(b.g.value), REPO_DIFF_ID, "context")}</td>
+        <td class="graph-cell">${resourceLink(b.g.value, GRAPH_LINK_TEXT, REPO_DIFF_ID, "context")}</td>
         <td>${escape(b.version?.value ?? "")}</td>
         <td class="time">${escape(b.issued?.value ?? "")}</td>
-        <td class="time">${escape(period)}</td>
-        <td>${b.profile ? resourceLink(b.profile.value, b.profile.value, REPO_DIFF_ID) : ""}</td>
-        <td>${m(b.prev)}</td>`;
-      const dlBtn = document.createElement("button");
-      dlBtn.type = "button";
-      dlBtn.className = "row-action";
-      dlBtn.textContent = "Download TriG";
-      dlBtn.title = `Download ${b.model.value} as TriG`;
-      dlBtn.onclick = () => {
-        downloadTrig(b).catch((e) => (statusEl.textContent = String(e)));
-      };
-      const actionTd = document.createElement("td");
-      actionTd.className = "actions-cell";
-      actionTd.append(dlBtn);
-      tr.append(actionTd);
+        <td>${prior ? resourceLink(b.prev!.value, prior.label, prior.repo) : m(b.prev)}</td>`;
+      tr.append(downloadCell(() => downloadTrig(b), `Download ${b.model.value} as TriG`));
       return tr;
     }),
+    // The base SSH model from cim-history: the first link of the chain, version 1.
+    ...(base ? [baseModelRow(base)] : []),
   );
   modelsLoaded = true;
-  modelsCount.textContent = `${rows.length} model(s) in ${REPO_DIFF_ID}`;
   modelCount = rows.length;
   renderCounts();
+  if (historyLoaded) renderHistory();
+}
+
+function baseModelRow(base: BaseModel) {
+  const tr = document.createElement("tr");
+  tr.className = "kind-full base";
+  const label = nameDesc(base.title, base.desc) || shortIri(base.g);
+  tr.innerHTML = `
+    <td class="kind-cell"><span class="kind full">FullModel</span></td>
+    <td>${resourceLink(base.g, label, REPO_CIM_ID)} <span class="base-note">(base, in ${escape(REPO_CIM_ID)})</span></td>
+    <td class="graph-cell">${resourceLink(base.g, GRAPH_LINK_TEXT, REPO_CIM_ID, "context")}</td>
+    <td>${escape(base.version)}</td>
+    <td class="time">${escape(base.issued)}</td>
+    <td></td>`;
+  tr.append(downloadCell(() => downloadBase(base), "Download the base model as it was before any transaction, as TriG"));
+  return tr;
 }
 
 function toggle(s: Switch) {
@@ -550,13 +748,28 @@ async function submit() {
   statusEl.textContent = `Committed ${rows.length} change(s) at ${new Date().toISOString()}`;
 }
 
-function setTab(tab: Tab) {
+const TABS: Tab[] = ["switches", "history", "models"];
+
+/** The tab named in the URL fragment (e.g. …/modelops#history), so a reload keeps it. */
+function tabFromHash(): Tab {
+  const name = location.hash.slice(1);
+  return (TABS as string[]).includes(name) ? (name as Tab) : "switches";
+}
+
+/** Show a tab and record it in the URL fragment, without loading anything. */
+function showTab(tab: Tab) {
+  // replaceState: no scroll jump to the element with that id, and no extra Back-button entries.
+  if (location.hash !== `#${tab}`) history.replaceState(null, "", `#${tab}`);
   panelSwitches.hidden = tab !== "switches";
   panelHistory.hidden = tab !== "history";
   panelModels.hidden = tab !== "models";
   $<HTMLButtonElement>("#tab-switches").setAttribute("aria-selected", String(tab === "switches"));
   $<HTMLButtonElement>("#tab-history").setAttribute("aria-selected", String(tab === "history"));
   $<HTMLButtonElement>("#tab-models").setAttribute("aria-selected", String(tab === "models"));
+}
+
+function setTab(tab: Tab) {
+  showTab(tab);
   if (tab === "history" && !historyLoaded) {
     loadHistory().catch((e) => (statusEl.textContent = String(e)));
   }
@@ -571,15 +784,12 @@ $<HTMLButtonElement>("#reset").onclick = () => {
   render();
 };
 submitEl.onclick = submit;
-historyRefresh.onclick = () => {
+// Top-bar Refresh reloads every tab, so the header counts stay current too.
+$<HTMLButtonElement>("#refresh").onclick = () => {
   historyLoaded = false;
-  loadHistory().catch((e) => (statusEl.textContent = String(e)));
-};
-historyGenDiff.onclick = () => {
-  generateDiffModel().catch((e) => (statusEl.textContent = String(e)));
-};
-modelsRefresh.onclick = () => {
   modelsLoaded = false;
+  load().catch((e) => (statusEl.textContent = String(e)));
+  loadHistory().catch((e) => (statusEl.textContent = String(e)));
   loadModels().catch((e) => (statusEl.textContent = String(e)));
 };
 $<HTMLButtonElement>("#tab-switches").onclick = () => setTab("switches");
@@ -591,6 +801,12 @@ for (const link of [modelsLink, historyLink]) {
     setTab(link.dataset.tab as Tab);
   };
 }
+
+// A fragment typed into the address bar switches tabs too.
+window.addEventListener("hashchange", () => setTab(tabFromHash()));
+
+// Open the tab named in the URL; every tab is loaded below anyway.
+showTab(tabFromHash());
 
 // Load every tab up front so the header counts are always shown, whichever tab is open.
 load().catch((e) => (statusEl.textContent = String(e)));

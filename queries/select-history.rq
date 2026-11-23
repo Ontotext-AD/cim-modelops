@@ -16,7 +16,6 @@ FROM onto:explicit {
     hist:object ?o ;
     hist:insert ?i .
   OPTIONAL { ?transactionId hist:graph ?g }
-  OPTIONAL { ?transactionId hist:username ?username }
   OPTIONAL {
     SELECT ?s (SAMPLE(?n) AS ?sName) (SAMPLE(?d) AS ?sDesc) WHERE {
       ?s cim:IdentifiedObject.name ?n .

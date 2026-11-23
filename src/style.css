@@ -3,12 +3,17 @@ body {
   display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 }
 header { flex-shrink: 0; display: flex; align-items: baseline; gap: 1rem; padding: 0.75rem 1rem; background: #1f5f4a; color: #fff; }
-header h1 { font-size: 1.1rem; margin: 0; }
+header h1 { font-size: 1.1rem; margin: 0; white-space: nowrap; }
 #status { font-size: 0.85rem; opacity: 0.85; margin-left: auto; }
 #counts { font-size: 0.85rem; white-space: nowrap; }
 #counts a { color: #fff; text-decoration: none; }
 #counts a:hover { text-decoration: underline; }
 #counts .sep { color: #cfe4db; }
+#refresh {
+  align-self: center; padding: 0.2rem 0.7rem; border: 1px solid #2f7a62; border-radius: 4px;
+  background: #174a3a; color: #fff; cursor: pointer; font: inherit; font-size: 0.85rem;
+}
+#refresh:hover { background: #2f7a62; }
 
 #tabs { display: flex; gap: 0.25rem; }
 #tabs button {
@@ -38,7 +43,11 @@ section { overflow: auto; padding: 1rem; }
   font-weight: 600; cursor: pointer; background: #f4f7f5; color: #1d2a24;
 }
 .state svg { flex-shrink: 0; }
+/* Same colours as Old/New in the Transaction table: open = red, closed = green. */
+.state.open { color: #b23b3b; border-color: #b23b3b; }
+.state.closed { color: #2e8b57; border-color: #2e8b57; }
 h2 { font-size: 0.95rem; margin: 0 0 0.5rem; }
+.note { font-size: 0.8rem; color: #5b6b64; margin: -0.25rem 0 0.5rem; }
 #quads { background: #f4f7f5; padding: 0.75rem; font-size: 0.8rem; min-height: 4rem; white-space: pre-wrap; word-break: break-all; }
 #quads .del { color: #b23b3b; }
 #quads .ins { color: #2e8b57; }
@@ -52,18 +61,12 @@ h2 { font-size: 0.95rem; margin: 0 0 0.5rem; }
 #submit { background: #1f5f4a; color: #fff; border: none; border-radius: 4px; }
 #submit:disabled { background: #9db3aa; }
 
-#history-toolbar, #models-toolbar {
-  flex-shrink: 0; display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
-  padding: 0.65rem 1rem; border-bottom: 1px solid #d5e0db;
-}
-#history-refresh, #models-refresh, #history-gen-diff, .row-action {
+.row-action {
   padding: 0.35rem 0.85rem; border: 1px solid #9db3aa; border-radius: 4px;
   background: #f4f7f5; cursor: pointer; font: inherit;
 }
-#history-gen-diff { background: #1f5f4a; color: #fff; border-color: #1f5f4a; }
-#history-gen-diff:disabled { background: #9db3aa; border-color: #9db3aa; cursor: default; }
-#history-count, #history-range, #models-count { font-size: 0.85rem; color: #5b6b64; }
-#history-range { margin-right: auto; color: #1d2a24; }
+.row-action:disabled { color: #9db3aa; cursor: not-allowed; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 #history-wrap, #models-wrap { flex: 1; min-height: 0; overflow: auto; padding: 0 1rem 1rem; }
 #history, #models { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
 #history th, #history td, #models th, #models td {
@@ -83,15 +86,25 @@ h2 { font-size: 0.95rem; margin: 0 0 0.5rem; }
 #history .op.delete { color: #8f2a2a; background: #f8e0e0; }
 #models .kind.full { color: #1b4f8a; background: #e4f0fb; }
 #models .kind.diff { color: #7a4a12; background: #f8ecd9; }
-#history tr.insert { background: #f7fcf9; }
-#history tr.delete { background: #fdf8f8; }
+/* Two levels: a transaction row, then its changed triples (shown when expanded). */
+#history tr.tx { background: #fff; }
+#history tr.tx td { border-top: 1px solid #d5e0db; }
+#history tr.detail.insert { background: #f7fcf9; }
+#history tr.detail.delete { background: #fdf8f8; }
 #history tr.selected-from { outline: 2px solid #2f7a62; outline-offset: -2px; }
-#history tr.selected-to { outline: 2px solid #b8860b; outline-offset: -2px; }
-#history tr.selected-from.selected-to { outline-color: #1f5f4a; }
+#history .toggle-cell { width: 1.5rem; max-width: 1.5rem; }
+#history .toggle { border: none; background: none; cursor: pointer; font-size: 1rem; line-height: 1; padding: 0 0.25rem; color: #1f5f4a; }
+#history .toggle:hover { color: #174a3a; }
+#history .summary { color: #3d4a44; }
+#history .actions-cell > * + * { margin-left: 0.5rem; }
+#history a.download, #models a.download { white-space: nowrap; }
+#models .graph-cell { white-space: nowrap; overflow-wrap: normal; }
+#models tr.base { background: #f4f7f5; }
+#models .base-note { color: #5b6b64; font-size: 0.75rem; }
 #history .pick { width: 2.5rem; text-align: center; max-width: 2.5rem; word-break: normal; }
 #history .pick input { cursor: pointer; }
 #history .pick input:disabled { cursor: not-allowed; opacity: 0.35; }
 #history .actions-cell, #models .actions-cell { white-space: nowrap; word-break: normal; max-width: none; }
 #history .row-action, #models .row-action { font-size: 0.75rem; padding: 0.2rem 0.5rem; white-space: nowrap; }
 #history .literal, #models .literal { color: #3d4a44; font-family: ui-monospace, monospace; }
-#history .time, #history .user, #models .time, #models .kind-cell { white-space: nowrap; word-break: normal; }
+#history .time, #models .time, #models .kind-cell { white-space: nowrap; word-break: normal; }

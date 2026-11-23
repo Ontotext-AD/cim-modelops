@@ -1,0 +1,46 @@
+# Run in repository `cim-history`. The base SSH model as it was before any
+# transaction: the live graph has every switch flip applied, so its content is
+# rebuilt from History. Same rule as history-full-model-federated.ru, with t1
+# before the first event:
+#   present at the start ⇔ its first event is a delete, or it has no events and is present now.
+# The graph's own header (?s = graph) is never changed by transactions and is copied as is.
+#
+# Placeholder (filled by the app):
+#   <urn:uuid:GRAPH> → base model graph
+
+PREFIX hist: <http://www.ontotext.com/at/>
+
+CONSTRUCT { ?s ?p ?o } WHERE {
+  {
+    GRAPH <urn:uuid:GRAPH> { <urn:uuid:GRAPH> ?p ?o }
+    BIND (<urn:uuid:GRAPH> AS ?s)
+  }
+  UNION
+  {
+    {
+      SELECT ?s ?p ?o (MIN(?time) AS ?first) WHERE {
+        ?x a hist:history ;
+           hist:timestamp ?time ;
+           hist:graph <urn:uuid:GRAPH> ;
+           hist:subject ?s ; hist:predicate ?p ; hist:object ?o .
+        FILTER (?s != <urn:uuid:GRAPH>)
+      }
+      GROUP BY ?s ?p ?o
+    }
+    ?y a hist:history ;
+       hist:timestamp ?first ;
+       hist:graph <urn:uuid:GRAPH> ;
+       hist:subject ?s ; hist:predicate ?p ; hist:object ?o ;
+       hist:insert false .
+  }
+  UNION
+  {
+    GRAPH <urn:uuid:GRAPH> { ?s ?p ?o }
+    FILTER (?s != <urn:uuid:GRAPH>)
+    FILTER NOT EXISTS {
+      ?x a hist:history ;
+         hist:graph <urn:uuid:GRAPH> ;
+         hist:subject ?s ; hist:predicate ?p ; hist:object ?o .
+    }
+  }
+}

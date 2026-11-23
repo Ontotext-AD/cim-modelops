@@ -8,6 +8,11 @@
 #   <repository:HISTORY_REPO> → federated history repo id
 #   <urn:uuid:GRAPH>          → source named graph
 #   "T1"^^xsd:dateTime        → snapshot time
+#   <urn:uuid:PRIOR>          → prior model in the chain (latest exported model before T1, else the base SSH model)
+#   "NEXT_VERSION"            → prior model's dcat:version + 1
+#
+# Naming (CIM ModelOps PoC): model M = urn:uuid:<new>, stored in graph M#FullModel.
+# The extraction time t1 is also the model's validity start (dct:temporal / dcat:startDate).
 
 PREFIX hist: <http://www.ontotext.com/at/>
 PREFIX dcat: <http://www.w3.org/ns/dcat#>
@@ -17,15 +22,18 @@ PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
 INSERT {
   GRAPH ?newG {
     ?s ?p ?o .
-    ?newG a dcat:Dataset ;
+    ?model a dcat:Dataset ;
       dct:identifier       ?uuid ;
       dct:issued           ?t1 ;
       dct:conformsTo       ?profile ;
       dct:requires         ?requires ;
       dcat:isVersionOf     ?grid ;
-      dcat:previousVersion ?g ;
-      dcat:version         ?version ;
+      dcat:previousVersion <urn:uuid:PRIOR> ;
+      dcat:version         "NEXT_VERSION" ;
+      dct:temporal         ?period ;
       dct:description      ?desc .
+    ?period a dct:PeriodOfTime ;
+      dcat:startDate ?t1 .
   }
 }
 WHERE {
@@ -72,11 +80,11 @@ WHERE {
     OPTIONAL { GRAPH ?g { ?g dct:conformsTo ?profile } }
     OPTIONAL { GRAPH ?g { ?g dct:requires ?requires } }
     OPTIONAL { GRAPH ?g { ?g dcat:isVersionOf ?grid } }
-    OPTIONAL { GRAPH ?g { ?g dcat:version ?prevVersion } }
   }
   { SELECT (STRUUID() AS ?uuid) {} }
 
-  BIND (STR(xsd:integer(?prevVersion) + 1) AS ?version)
-  BIND (IRI(CONCAT("urn:uuid:", ?uuid)) AS ?newG)
+  BIND (IRI(CONCAT("urn:uuid:", ?uuid)) AS ?model)
+  BIND (IRI(CONCAT("urn:uuid:", ?uuid, "#FullModel")) AS ?newG)
+  BIND (IRI(CONCAT("urn:uuid:", ?uuid, "#temporal")) AS ?period)
   BIND (CONCAT("Full model from History at ", STR(?t1)) AS ?desc)
 }
