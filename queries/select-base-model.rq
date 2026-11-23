@@ -1,0 +1,19 @@
+# The base SSH FullModel: the graph in `cim-history` whose switches the demo edits.
+# Used by the Models tab (first link of the model chain) and as the prior version
+# of the first exported model. dct:issued may appear twice (date and dateTime);
+# the app keeps the most precise one. The version comes from the model's own graph
+# header ("1"); the catalogue outside the graph also has the release name
+# ("3.0.0-beta-1"), which is not a chain version.
+
+PREFIX cim:  <https://cim.ucaiug.io/ns#>
+PREFIX dcat: <http://www.w3.org/ns/dcat#>
+PREFIX dct:  <http://purl.org/dc/terms/>
+
+SELECT ?g ?title ?desc ?version ?issued WHERE {
+  { SELECT DISTINCT ?g WHERE { GRAPH ?g { ?sw cim:Switch.open ?open } } }
+  GRAPH ?g { ?g a dcat:Dataset }
+  OPTIONAL { ?g dct:title ?title }
+  OPTIONAL { ?g dct:description ?desc }
+  OPTIONAL { GRAPH ?g { ?g dcat:version ?version } }
+  OPTIONAL { ?g dct:issued ?issued }
+}

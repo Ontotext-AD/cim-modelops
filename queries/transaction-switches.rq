@@ -1,0 +1,15 @@
+# Opened in GraphDB Workbench from a History transaction link (repository `cim-history`).
+# Switch states as of that transaction, read from the History plugin's per-transaction graph.
+# The graph name is cut to whole seconds: with milliseconds GraphDB rejects it (GDB-15823).
+#
+# Placeholders (filled by the app):
+#   <http://www.ontotext.com/at/TX> → transaction graph, e.g. <http://www.ontotext.com/at/20261113122443>
+#   {{FILTER}}                      → filter(contains(?name, "…")) from the Switches filter, or nothing
+
+PREFIX cim: <https://cim.ucaiug.io/ns#>
+select *
+from <http://www.ontotext.com/at/TX>
+where {
+  ?x cim:IdentifiedObject.name ?name; cim:Switch.open ?y
+    {{FILTER}}
+}

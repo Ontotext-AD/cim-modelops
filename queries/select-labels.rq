@@ -1,0 +1,14 @@
+# Readable labels for resources (repository `cim-history`).
+# Used by the Models tab for Prior Version, which points to the base SSH model.
+#
+# Placeholder (filled by the app):
+#   {{IRIS}} → space-separated IRIs, e.g. <urn:uuid:…> <urn:uuid:…>
+
+PREFIX dct: <http://purl.org/dc/terms/>
+
+SELECT ?s (SAMPLE(?t) AS ?title) (SAMPLE(?d) AS ?desc) WHERE {
+  VALUES ?s { {{IRIS}} }
+  OPTIONAL { ?s dct:title ?t }
+  OPTIONAL { ?s dct:description ?d }
+}
+GROUP BY ?s
