@@ -2,18 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>CIM switch toggle</title>
+    <title>CIM ModelOps</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <header>
-      <h1>CIM switch toggle</h1>
+      <h1>CIM ModelOps</h1>
       <nav id="tabs" role="tablist">
         <button type="button" role="tab" id="tab-switches" aria-selected="true" data-tab="switches">Switches</button>
         <button type="button" role="tab" id="tab-history" aria-selected="false" data-tab="history">History</button>
         <button type="button" role="tab" id="tab-models" aria-selected="false" data-tab="models">Models</button>
       </nav>
       <span id="status"></span>
+      <span id="counts">
+        <a href="#" id="models-link" data-tab="models"></a>
+        <span class="sep">·</span>
+        <a href="#" id="history-link" data-tab="history"></a>
+      </span>
     </header>
 
     <div id="panel-switches" class="panel" role="tabpanel">
@@ -53,14 +58,13 @@
             <tr>
               <th title="Range start">From</th>
               <th title="Range end">To</th>
+              <th>Transaction</th>
               <th>Time</th>
               <th>Op</th>
               <th>Subject</th>
               <th>Predicate</th>
               <th>Object</th>
-              <th>Graph</th>
               <th>User</th>
-              <th>Transaction</th>
               <th></th>
             </tr>
           </thead>
@@ -86,7 +90,7 @@
               <th>Period</th>
               <th>Profile</th>
               <th>Previous</th>
-              <th>Description</th>
+              <th></th>
             </tr>
           </thead>
           <tbody></tbody>

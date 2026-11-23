@@ -4,10 +4,11 @@
 PREFIX cim: <https://cim.ucaiug.io/ns#>
 PREFIX dct: <http://purl.org/dc/terms/>
 
-SELECT ?g ?sw ?type ?name ?open (SAMPLE(?t) AS ?title) (SAMPLE(?d) AS ?desc) WHERE {
+SELECT ?g ?sw ?type ?name ?open (SAMPLE(?sd) AS ?swDesc) (SAMPLE(?t) AS ?title) (SAMPLE(?d) AS ?desc) WHERE {
   GRAPH ?g { ?sw cim:Switch.open ?open }
   ?sw a ?type ; cim:IdentifiedObject.name ?name .
   VALUES ?type { cim:Breaker cim:Disconnector }
+  OPTIONAL { ?sw cim:IdentifiedObject.description ?sd }
   OPTIONAL { ?g dct:title ?t }
   OPTIONAL { ?g dct:description ?d }
 }
