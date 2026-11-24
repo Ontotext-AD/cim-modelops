@@ -26,4 +26,4 @@ SELECT ?g ?model ?kind ?version ?issued ?title ?desc ?prev ?fwd ?rev WHERE {
     OPTIONAL { ?model dcatcim:reverseDifferenceSet ?rev }
   }
 }
-ORDER BY DESC(?issued) ?kind ?model
+ORDER BY ASC(?issued) ?kind ?model
