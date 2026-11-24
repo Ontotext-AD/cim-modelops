@@ -103,6 +103,7 @@ const quadsEl = $<HTMLPreElement>("#quads");
 const diffBody = $<HTMLTableSectionElement>("#diff tbody");
 const submitEl = $<HTMLButtonElement>("#submit");
 const historyBody = $<HTMLTableSectionElement>("#history tbody");
+const historyHint = $<HTMLParagraphElement>("#history-hint");
 const modelsBody = $<HTMLTableSectionElement>("#models tbody");
 const panelSwitches = $<HTMLDivElement>("#panel-switches");
 const panelHistory = $<HTMLDivElement>("#panel-history");
@@ -370,6 +371,7 @@ function exportButton(label: string, title: string, enabled: boolean, onClick: (
 function renderHistory() {
   // Export state comes from the Models list; until it has loaded, nothing can be exported or picked.
   const ready = modelsLoaded && baseModel != null;
+  renderHistoryHint(ready);
   // From can only be the head model's transaction; drop a stale pick after the head moves.
   const fromTx = transactions.find((t) => t.id === fromTxId && isHeadTx(t)) ?? null;
   if (!fromTx) fromTxId = null;
@@ -431,26 +433,45 @@ function renderHistory() {
       timeTd.className = "time";
       timeTd.textContent = tx.time;
 
-      const summaryTd = document.createElement("td");
-      summaryTd.colSpan = 4;
-      summaryTd.className = "summary";
-      const subjects = [...new Set(tx.rows.map((b) => b.sName?.value ?? shortIri(b.s.value)))];
-      summaryTd.textContent = `${tx.rows.length} changed triple(s): ${subjects.join(", ")}`;
+      // The collapsed row sums up the transaction column by column, under the same
+      // Op / Subject / Predicate / Object headers its expanded triples use.
+      const summaryCell = (text: string) => {
+        const td = document.createElement("td");
+        td.className = "summary";
+        td.textContent = text;
+        return td;
+      };
+      const distinct = (values: string[]) => [...new Set(values)].join(", ");
+      const summaryTds = [
+        Object.assign(summaryCell(`${tx.rows.length} change${tx.rows.length === 1 ? "" : "s"}`), {
+          className: "summary change-count",
+        }),
+        summaryCell(distinct(tx.rows.map((b) => b.sName?.value ?? shortIri(b.s.value)))),
+        summaryCell(distinct(tx.rows.map((b) => shortIri(b.p.value)))),
+        summaryCell(""),
+      ];
 
       const exportTd = document.createElement("td");
       exportTd.className = "actions-cell";
       const forward = ready && canExportAt(tx);
+      // Full and Diff each get a fixed-width slot, so they line up whether they're a link or a button.
+      const slot = (el: HTMLElement) => {
+        const span = document.createElement("span");
+        span.className = "export-slot";
+        span.append(el);
+        return span;
+      };
       exportTd.append(
-        full
-          ? downloadLink("Download Full", full)
+        slot(full
+          ? downloadLink("Full", full)
           : exportButton(
               "Full",
               forward || !ready ? `Export a Full model at ${tx.time}` : pastHeadTitle(),
               forward,
               () => exportFull(tx),
-            ),
-        diff
-          ? downloadLink("Download Diff", diff)
+            )),
+        slot(diff
+          ? downloadLink("Diff", diff)
           : exportButton(
               "Diff",
               !forward && ready
@@ -460,10 +481,10 @@ function renderHistory() {
                   : "Select the newest model as From first",
               forward && !!fromTx && fromTx.g === tx.g,
               () => exportDiff(fromTx!, tx),
-            ),
+            )),
       );
 
-      tr.append(toggleTd, fromTd, txTd, timeTd, summaryTd, exportTd);
+      tr.append(toggleTd, fromTd, txTd, timeTd, ...summaryTds, exportTd);
       const details = tx.rows.map((b) => {
         const op = b.i.value === "true" ? "insert" : "delete";
         const subjectLabel = nameDesc(b.sName?.value, b.sDesc?.value);
@@ -482,6 +503,17 @@ function renderHistory() {
       return [tr, ...details];
     }),
   );
+}
+
+/** One line above History, shown only when no transaction can be exported, saying why. */
+function renderHistoryHint(ready: boolean) {
+  const head = headModel();
+  const nothingToExport = ready && !transactions.some(canExportAt);
+  historyHint.hidden = !nothingToExport;
+  if (!nothingToExport) return;
+  historyHint.textContent = transactions.length
+    ? `Nothing to export yet: the newest model (v${head ? versionOf(head) : 1}) is at the latest transaction. Make a change on the Switches tab first.`
+    : "No transactions yet. Make a change on the Switches tab first.";
 }
 
 async function exportFull(tx: Transaction) {
@@ -574,7 +606,7 @@ function downloadCell(onClick: () => Promise<void>, title: string) {
   const a = document.createElement("a");
   a.href = "#";
   a.className = "download";
-  a.textContent = "Download TriG";
+  a.textContent = "TriG";
   a.title = title;
   a.onclick = (e) => {
     e.preventDefault();
@@ -587,11 +619,11 @@ function downloadCell(onClick: () => Promise<void>, title: string) {
 }
 
 /** Readable label (dct:title, else dct:description) and repository for each Prior Version. */
-async function priorVersionLabels(rows: ModelRow[]) {
-  const labels = new Map<string, { label: string; repo: string }>();
+async function priorVersionLabels(rows: ModelRow[], base: BaseModel | null) {
+  const labels = new Map<string, { label: string; repo: string; version?: string }>();
   for (const r of rows) {
     const label = r.title?.value || r.desc?.value;
-    if (label) labels.set(r.model.value, { label, repo: REPO_DIFF_ID });
+    if (label) labels.set(r.model.value, { label, repo: REPO_DIFF_ID, version: r.version?.value });
   }
   // Prior versions not in cim-modelops (the base SSH model) live in cim-history.
   const missing = [...new Set(rows.map((r) => r.prev?.value))].filter(
@@ -604,10 +636,19 @@ async function priorVersionLabels(rows: ModelRow[]) {
     );
     for (const b of json.results.bindings as Record<string, Binding | undefined>[]) {
       const label = b.title?.value || b.desc?.value;
-      if (label) labels.set(b.s!.value, { label, repo: REPO_CIM_ID });
+      if (label) {
+        const version = b.s!.value === base?.g ? base.version : undefined;
+        labels.set(b.s!.value, { label, repo: REPO_CIM_ID, version });
+      }
     }
   }
   return labels;
+}
+
+/** "v1 · title": the prior's version number lines up with the Version column; the title links to it. */
+function priorVersionCell(iri: string, prior: { label: string; repo: string; version?: string }) {
+  const number = prior.version ? `<span class="prior-version">v${escape(prior.version)}</span> · ` : "";
+  return number + resourceLink(iri, prior.label, prior.repo);
 }
 
 async function loadModels() {
@@ -618,7 +659,7 @@ async function loadModels() {
   modelsBody.replaceChildren();
   const [json, base] = await Promise.all([sparqlSelect(REPO_DIFF, queries.selectModels), loadBaseModel()]);
   const rows = json.results.bindings as ModelRow[];
-  const priorLabels = await priorVersionLabels(rows);
+  const priorLabels = await priorVersionLabels(rows, base);
   modelRows = rows;
   baseModel = base;
   modelsBody.replaceChildren(
@@ -636,7 +677,7 @@ async function loadModels() {
         <td class="graph-cell">${resourceLink(b.g.value, GRAPH_LINK_TEXT, REPO_DIFF_ID, "context")}</td>
         <td>${escape(b.version?.value ?? "")}</td>
         <td class="time">${escape(b.issued?.value ?? "")}</td>
-        <td>${prior ? resourceLink(b.prev!.value, prior.label, prior.repo) : m(b.prev)}</td>`;
+        <td>${prior ? priorVersionCell(b.prev!.value, prior) : m(b.prev)}</td>`;
       tr.append(downloadCell(() => downloadTrig(b), `Download ${b.model.value} as TriG`));
       return tr;
     }),
