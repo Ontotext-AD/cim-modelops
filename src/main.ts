@@ -663,6 +663,8 @@ async function loadModels() {
   modelRows = rows;
   baseModel = base;
   modelsBody.replaceChildren(
+    // Oldest first: the base SSH model from cim-history is the first link of the chain, version 1.
+    ...(base ? [baseModelRow(base)] : []),
     ...rows.map((b) => {
       const tr = document.createElement("tr");
       const kind = b.kind.value;
@@ -681,8 +683,6 @@ async function loadModels() {
       tr.append(downloadCell(() => downloadTrig(b), `Download ${b.model.value} as TriG`));
       return tr;
     }),
-    // The base SSH model from cim-history: the first link of the chain, version 1.
-    ...(base ? [baseModelRow(base)] : []),
   );
   modelsLoaded = true;
   modelCount = rows.length;
