@@ -48,19 +48,23 @@
     </div>
 
     <div id="panel-history" class="panel" role="tabpanel" hidden>
+      <p id="history-hint" class="note" hidden></p>
       <div id="history-wrap">
         <table id="history">
           <thead>
             <tr>
-              <th><span class="visually-hidden">Show changes</span></th>
-              <th title="Model to start a difference model from">From</th>
-              <th>Transaction</th>
-              <th>Time</th>
+              <th rowspan="2"><span class="visually-hidden">Show changes</span></th>
+              <th rowspan="2" title="Model to start a difference model from">From</th>
+              <th rowspan="2">Transaction</th>
+              <th rowspan="2">Time</th>
+              <th colspan="4" class="group" title="A transaction row describes its changes here; expand it (▸) to see one triple per row">Transaction description</th>
+              <th rowspan="2">Export Model</th>
+            </tr>
+            <tr class="sub">
               <th>Op</th>
               <th>Subject</th>
               <th>Predicate</th>
               <th>Object</th>
-              <th>Export Model</th>
             </tr>
           </thead>
           <tbody></tbody>
